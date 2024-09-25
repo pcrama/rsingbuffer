@@ -1,23 +1,48 @@
 use std::mem::swap;
 
-pub struct RingBuffer<A> {
+struct RingBuffer<A> {
     buffer: Vec<A>,
     start: usize,
     end: usize,
     capacity: usize,
 }
 
-impl<A> RingBuffer<A> {
-    pub fn new(size: usize) -> RingBuffer<A> {
-        assert!(size > 0);
-        RingBuffer {
-            buffer: Vec::<A>::with_capacity(size),
-            start: 0,
-            end: 0,
-            capacity: size,
+struct RingBufferView<A> {
+    ring_buffer: RingBuffer<A>
+}
+
+pub fn new<A>(size: usize) -> RingBuffer<A> {
+    assert!(size > 0);
+    RingBuffer {
+        buffer: Vec::<A>::with_capacity(size),
+        start: 0,
+        end: 0,
+        capacity: size,
+    }
+}
+
+pub fn freeze<A>(ring_buffer: RingBuffer<A>) -> RingBufferView<A> {
+    RingBufferView { ring_buffer }
+}
+
+impl<A> RingBufferView<A> {
+    pub fn at<'a>(&'a self, idx: usize) -> Option<&'a A> {
+        if idx >= self.ring_buffer.capacity {
+            return None
         }
+        let idx = (self.ring_buffer.start + idx) % self.ring_buffer.capacity;
+        if idx >= self.ring_buffer.end {
+            return None
+        }
+        return Some(&self.ring_buffer.buffer[idx])
     }
 
+    pub fn thaw(self) -> RingBuffer<A> {
+        self.ring_buffer
+    }
+}
+
+impl<A> RingBuffer<A> {
     pub fn len(&self) -> usize {
         if self.start == 0 && self.end == 0 {
             return 0;
@@ -85,7 +110,7 @@ mod tests {
 
     #[test]
     fn fresh_ringbuffer_len_is_0() {
-        assert_eq!(RingBuffer::<&str>::new(5).len(), 0);
+        assert_eq!(new<&str>(5).len(), 0);
     }
 
     fn idint(x: &i32) -> i32 {
@@ -94,13 +119,13 @@ mod tests {
 
     #[test]
     fn fresh_ringbuffer_peek_is_none() {
-        assert_eq!(RingBuffer::<i32>::new(23).peek_first(idint), None);
-        assert_eq!(RingBuffer::<i32>::new(3).peek_last(idint), None);
+        assert_eq!(new::<&str>(23).peek_first(idint), None);
+        assert_eq!(new::<bool>(3).peek_last(idint), None);
     }
 
     #[test]
     fn fresh_ringbuffer_peek_when_filling() {
-        let mut rb = RingBuffer::<i32>::new(3);
+        let mut rb = new::<usize>(3);
         rb.push(3);
         assert_eq!(rb.peek_first(idint), Some(3));
         assert_eq!(rb.peek_last(idint), Some(3));
@@ -126,11 +151,35 @@ mod tests {
 
     #[test]
     fn ringbuffer_overwrites_when_pushing_enough() {
-        let mut rb = RingBuffer::<i32>::new(3);
+        let mut rb = new::<i32>(3);
         assert_eq!(rb.push(3), None);
         assert_eq!(rb.push(4), None);
         assert_eq!(rb.push(5), None);
         assert_eq!(rb.push(6), Some(3));
         assert_eq!(rb.push(7), Some(4));
+    }
+
+    #[test]
+    fn ringbuffer_freeze_and_thaw_overwrites_when_pushing_enough() {
+        let mut rb = new::<i32>(3);
+        assert_eq!(rb.push(3), None);
+        assert_eq!(rb.push(4), None);
+        let rbv = freeze(rb);
+        assert_eq!(rbv.at(0), Some(3).as_ref());
+        assert_eq!(rbv.at(1), Some(4).as_ref());
+        assert_eq!(rbv.at(2), None);
+        assert_eq!(rbv.at(3), None);
+        let mut rb = rbv.thaw();
+        assert_eq!(rb.push(5), None);
+        assert_eq!(rb.push(6), Some(3));
+        assert_eq!(rb.push(7), Some(4));
+        let rbv = freeze(rb);
+        assert_eq!(rbv.at(0), Some(5).as_ref());
+        assert_eq!(rbv.at(1), Some(6).as_ref());
+        assert_eq!(rbv.at(2), Some(7).as_ref());
+        assert_eq!(rbv.at(3), None);
+        let mut rb = rbv.thaw();
+        rb.capacity = 4;
+        assert_eq!(rb.capacity, 3);
     }
 }
